@@ -5,7 +5,7 @@
 # @LastModified: 
 # Copyright (c) 2025 by 胡H, All Rights Reserved.
 # @desc:
-
+from concurrent.futures import ThreadPoolExecutor
 
 import os
 import requests
@@ -23,41 +23,55 @@ def parse_m3u8(file_path):
     return urls
 
 
-def download_segments(urls, folder='ts_segments'):
-    # 创建存储TS的文件夹
-    os.makedirs(folder, exist_ok=True)
+class Download_segments():
+    def __init__(self, urls, max_workers):
+        self.urls = urls
+        self.folder = 'ts_segments'
+        self.max_workers = max_workers
+        self.headers = {
+            'accept': '*/*',
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7',
+            'cache-control': 'no-cache',
+            'origin': 'https://rapid-cloud.co',
+            'pragma': 'no-cache',
+            'priority': 'u=1, i',
+            'referer': 'https://rapid-cloud.co/',
+            'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'cross-site',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        }
 
-    headers = {
-        'accept': '*/*',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7',
-        'cache-control': 'no-cache',
-        'origin': 'https://rapid-cloud.co',
-        'pragma': 'no-cache',
-        'priority': 'u=1, i',
-        'referer': 'https://rapid-cloud.co/',
-        'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'cross-site',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-    }
-
-    for idx, url in enumerate(urls):
+    def download_task(self, args):
+        """单个下载任务"""
+        idx, url = args
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=self.headers, timeout=10)
             response.raise_for_status()
-            # 使用带文件夹路径的文件名
-            filename = os.path.join(folder, f'segment_{idx + 1:03d}.ts')
+            filename = os.path.join(self.folder, f'segment_{idx + 1:03d}.ts')
             with open(filename, 'wb') as f:
                 f.write(response.content)
-            print(f'已下载：{filename}')
+            return f'成功：{filename}'
         except Exception as e:
-            print(f'下载失败：{url}，错误：{e}')
+            return f'失败：{url} [{str(e)[:30]}]'  # 截短错误信息
+
+    def main_mu(self):
+        """多线程下载实现"""
+        os.makedirs(self.folder, exist_ok=True)
+
+        tasks = [(idx, url) for idx, url in enumerate(urls)]
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            results = executor.map(self.download_task, tasks)
+            # 打印实时进度
+            for result in results:
+                print(result)
 
 
-def merge_to_mp4(folder='ts_segments'):
+def merge_to_mp4(output, folder='ts_segments', ):
     # 生成文件列表（带文件夹路径）
     file_list = []
     for f in sorted(os.listdir(folder)):
@@ -74,7 +88,7 @@ def merge_to_mp4(folder='ts_segments'):
         '-safe', '0',
         '-i', 'file_list.txt',
         '-c', 'copy',
-        'output.mp4'
+        f'{output}.mp4'
     ], check=True)
 
     # 清理临时文件
@@ -90,8 +104,7 @@ if __name__ == '__main__':
     m3u8_file = 'playlist.m3u8'  # M3U8文件路径
     urls = parse_m3u8(m3u8_file)
 
-    # 下载TS到指定文件夹
-    download_segments(urls)
+    download_segments = Download_segments(urls, max_workers=12)
+    download_segments.main_mu()
 
-    # 合并并清理
-    merge_to_mp4()
+    merge_to_mp4(output='海贼王1124')  # ffmpeg 合并并清理
